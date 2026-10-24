@@ -1,0 +1,10 @@
+services:
+  quantbot:
+    build: .
+    container_name: quant_trading_agent_v5
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./trading.log:/app/trading.log
+      - ./bot_state.json:/app/bot_state.json

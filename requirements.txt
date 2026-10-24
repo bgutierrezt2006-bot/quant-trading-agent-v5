@@ -1,0 +1,9 @@
+alpaca-py
+pandas
+numpy
+python-dotenv
+pydantic
+schedule
+yfinance
+feedparser
+requests

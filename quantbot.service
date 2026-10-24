@@ -1,0 +1,17 @@
+[Unit]
+Description=Agente de Trading Cuantitativo Autonomo V5.5 (Alpaca Real-Time)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agente-trading
+ExecStart=/home/ubuntu/agente-trading/venv/bin/python /home/ubuntu/agente-trading/main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/agente-trading/trading.log
+StandardError=append:/home/ubuntu/agente-trading/trading.log
+
+[Install]
+WantedBy=multi-user.target
