@@ -369,6 +369,19 @@ class RealTimeTradingEngine:
         """
         while self.is_running:
             await asyncio.sleep(60)
+
+            # Límite de tiempo si se ejecuta en Cloud Runner (ej. GitHub Actions)
+            max_runtime = os.getenv("MAX_RUNTIME_MINUTES")
+            if max_runtime:
+                try:
+                    limit_sec = float(max_runtime) * 60.0
+                    if time.time() - getattr(self, "session_start_ts", time.time()) >= limit_sec:
+                        logger.info("⏰ Límite de sesión alcanzado en bucle WebSocket. Deteniendo WebSockets limpiamente...")
+                        await self.stop()
+                        break
+                except ValueError:
+                    pass
+
             if not self.executor.is_market_open():
                 logger.info("🔔 El mercado ha cerrado. Deteniendo WebSockets de la sesión actual.")
                 await self.stop()
@@ -384,6 +397,7 @@ class RealTimeTradingEngine:
     async def start_session(self):
         """Inicia la sesión en tiempo real mientras el mercado esté abierto."""
         self.is_running = True
+        self.session_start_ts = time.time()
         logger.info("🚀 Iniciando Motor Cuantitativo Real-Time V5.5 Cloud 24/7 (WebSockets IEX)...")
 
         await asyncio.to_thread(self.refresh_context_cache)

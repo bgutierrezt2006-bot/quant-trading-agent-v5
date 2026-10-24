@@ -1,0 +1,61 @@
+name: QuantBot V5.5 Autonomous Cloud Runner
+
+on:
+  schedule:
+    # Turno Mañana NY (Lunes a Viernes 13:00 UTC = 09:00 AM EDT)
+    - cron: '0 13 * * 1-5'
+    # Turno Tarde NY (Lunes a Viernes 17:00 UTC = 13:00 PM EDT)
+    - cron: '0 17 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Modo de ejecucion (live o --test-once)'
+        required: true
+        default: '--test-once'
+
+permissions:
+  contents: write
+
+jobs:
+  run-quantbot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 250
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run QuantBot V5.5 Session
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TZ: America/New_York
+          MAX_RUNTIME_MINUTES: 235
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "--test-once" ]; then
+            python main.py --test-once
+          else
+            python main.py --max-runtime-minutes 235
+          fi
+
+      - name: Persist bot_state.json back to repository
+        if: always()
+        run: |
+          if [ -f bot_state.json ]; then
+            git config user.name "QuantBot Autonomous State"
+            git config user.email "quantbot@users.noreply.github.com"
+            git add bot_state.json || git add -f bot_state.json
+            git diff --staged --quiet || git commit -m "chore(state): update persistent Profit Locks in bot_state.json"
+            git push || true
+          fi

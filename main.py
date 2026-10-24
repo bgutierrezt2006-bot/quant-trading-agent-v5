@@ -1,6 +1,9 @@
+import os
 import sys
 import time
 import asyncio
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import schedule
 from logger import logger
 from market_scanner import AutonomousMarketScanner
@@ -9,6 +12,23 @@ from realtime_stream import RealTimeTradingEngine
 from notifier import DiscordNotifier
 
 ACTIVE_WATCHLIST = ["MSFT", "AAPL", "GOOGL", "AVGO"]
+
+
+def parse_max_runtime_minutes() -> float | None:
+    """Extrae el tiempo máximo de ejecución en minutos desde CLI o variable de entorno."""
+    for i, arg in enumerate(sys.argv):
+        if arg == "--max-runtime-minutes" and i + 1 < len(sys.argv):
+            try:
+                return float(sys.argv[i + 1])
+            except ValueError:
+                pass
+    env_val = os.getenv("MAX_RUNTIME_MINUTES")
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    return None
 
 
 def refresh_autonomous_watchlist() -> list[str]:
@@ -116,6 +136,11 @@ def main():
         run_diagnostic_once()
         return
 
+    max_runtime_minutes = parse_max_runtime_minutes()
+    start_time = time.time()
+    if max_runtime_minutes:
+        logger.info(f"⏳ [CLOUD RUNNER] Límite de sesión activo: {max_runtime_minutes:.0f} minutos.")
+
     executor = AlpacaExecutor()
     refresh_autonomous_watchlist()
 
@@ -125,6 +150,26 @@ def main():
     while True:
         try:
             schedule.run_pending()
+
+            # 1. Control de tiempo máximo de ejecución para Cloud Runner
+            if max_runtime_minutes:
+                elapsed_min = (time.time() - start_time) / 60.0
+                if elapsed_min >= max_runtime_minutes:
+                    logger.info(
+                        f"⏰ [CLOUD RUNNER] Tiempo máximo alcanzado ({elapsed_min:.1f}m >= {max_runtime_minutes:.1f}m). "
+                        "Finalizando sesión limpiamente con código 0..."
+                    )
+                    sys.exit(0)
+
+            # 2. Control de cierre tras fin de jornada de Wall Street (16:00 NY)
+            now_ny = datetime.now(ZoneInfo("America/New_York"))
+            if not executor.is_market_open() and (now_ny.hour > 16 or (now_ny.hour == 16 and now_ny.minute >= 2)):
+                if max_runtime_minutes:
+                    logger.info(
+                        f"🔔 [CLOUD RUNNER] Mercado de NY cerrado ({now_ny.strftime('%H:%M')} NY). "
+                        "Finalizando sesión de Cloud Runner limpiamente..."
+                    )
+                    sys.exit(0)
 
             if executor.check_circuit_breaker():
                 logger.warning("🚨 Circuit Breaker Diario activo. Esperando 15 minutos...")
@@ -136,6 +181,13 @@ def main():
                 engine = RealTimeTradingEngine(ACTIVE_WATCHLIST)
                 asyncio.run(engine.start_session())
                 logger.info("⏸️ Sesión de WebSockets finalizada. Volviendo a modo vigilia...")
+
+                # Si el mercado cerró durante la sesión en Cloud Runner, terminar limpiamente
+                if max_runtime_minutes and not executor.is_market_open():
+                    now_ny_post = datetime.now(ZoneInfo("America/New_York"))
+                    if now_ny_post.hour >= 16:
+                        logger.info("🔔 Mercado de NY cerrado tras la sesión. Finalizando Cloud Runner...")
+                        sys.exit(0)
             else:
                 logger.info("🌙 Mercado CERRADO. En vigilia activa (próximo chequeo en 60s)...")
                 time.sleep(60)
@@ -143,6 +195,8 @@ def main():
         except KeyboardInterrupt:
             logger.info("🛑 Agente detenido manualmente por el usuario.")
             break
+        except SystemExit:
+            raise
         except Exception as e:
             logger.error(f"❌ Error en el orquestador principal: {e}")
             time.sleep(30)
